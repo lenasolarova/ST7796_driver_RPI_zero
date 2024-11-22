@@ -1,8 +1,12 @@
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <WiringPi/wiringPi/wiringPi.h>
 #include <WiringPi/wiringPi/wiringPiSPI.h>
+
+#define EXIT_SUCCESS 0
+#define EXIT_FAILURE 1
 
 #define CS_ACTIVE digitalWrite(8, LOW)
 #define CS_IDLE digitalWrite(8, HIGH)
@@ -11,6 +15,8 @@
 #define RESET digitalWrite(27, LOW)
 
 #define WRITE_DATA 0x2C
+
+#define DISPLAY_SIZE 480 * 320 * 2
 //4.0' SPI Module ST7796
 
 //display pin 5 (DC/RS) from rpi pin 25 (HIGH = data, LOW = command)
@@ -32,7 +38,6 @@ void reset(unsigned char* buffer){
 
     CS_ACTIVE;
     CD_COMMAND;
-
     *buffer = 0x00;
     wiringPiSPIDataRW(CHANNEL, buffer, 4);
 
@@ -114,9 +119,47 @@ void set_addr_window(){
     CS_IDLE;
 }
 
+uint16_t rgb565_color_from_hexrgb(int hexrgb){
+    int red8 = (hexrgb & 0xff0000) >> 16;
+    int green8 = (hexrgb & 0x00ff00) >> 8;
+    int blue8 = (hexrgb & 0x0000ff);
+    printf("%x %x %x\n", red8, green8, blue8);
+
+    int red5 = red8 / 255.0 * 31;
+    int green6 = green8 / 255.0 * 63;
+    int blue5 = blue8 / 255.0 * 31;
+    printf("%x %x %x\n", red5, green6, blue5);
+
+    int red5_shifted = red5 << 11;
+    int green6_shifted = green6 << 5;
+    printf("%x %x \n", red5_shifted, green6_shifted);
+
+    return red5_shifted | green6_shifted | blue5;
+}
+
+//fill buffer of DISPLAY_SIZE size by color(rgb 24bit)
+void fill_buffer(unsigned char* buffer, int color){
+    uint16_t rgb565_color = rgb565_color_from_hexrgb(color);
+    for (int i = 0; i < DISPLAY_SIZE; i += 2) {
+        buffer[i] = rgb565_color >> 8;
+        buffer[i + 1] = rgb565_color;
+    }
+    printf("%d\n", buffer[0]);
+    printf("%d\n", buffer[1]);
+}
+
+
+void fill_display_from_buffer(unsigned char* buffer){
+    CD_DATA;
+    for(int i = 0; i < (DISPLAY_SIZE); i += 2){
+        wiringPiSPIDataRW(CHANNEL, buffer + i, 2);
+    }
+    CS_IDLE;
+}
+
 int main(void){
     int fd, result;
-    unsigned char buffer[480 * 320 * 2] = {0x00};
+    unsigned char buffer[DISPLAY_SIZE] = {0x00};
     fd = wiringPiSPISetup(CHANNEL, 4000000);
     wiringPiSetupGpio();
 
@@ -138,7 +181,7 @@ int main(void){
     set_addr_window();
     sleep(1);
 
-    for (int i = 0; i < 480 * 320 * 2; i++) {
+    for (int i = 0; i < DISPLAY_SIZE; i++){
         buffer[i] = 0x00;
     }
 
@@ -148,43 +191,32 @@ int main(void){
     wiringPiSPIDataRW(CHANNEL, command16, 2);
     sleep(1);
 
-    CD_DATA;
-    for(int i = 0; i < (480 * 320 * 2); i += 2){
-        wiringPiSPIDataRW(CHANNEL, buffer + i, 2);
-    }
-    CS_IDLE;
+    fill_display_from_buffer(buffer);
 
-    //non functional----------------------------------------------
+    //----------------------------------------------
     printf("after black, before white\n");
     sleep(2);
 
     CS_ACTIVE;
-/*    CD_COMMAND;
-    unsigned char test[] = {0x00, 0x28};
-    wiringPiSPIDataRW(CHANNEL, test, 2);
-    sleep(1);
-    test[1] = 0x29;
-    wiringPiSPIDataRW(CHANNEL, test, 2);
-    sleep(1);
-    //0x36, 1, 0x48
-    test[0] = 0x48;
-    write16(0x36, test, 1);
-    sleep(1);
-*/
-    unsigned char buffer1[480 * 320 * 2] = {0xFF};
-    for (int i = 0; i < 480 * 320 * 2; i++) {
+
+    unsigned char buffer1[DISPLAY_SIZE] = {0xFF};
+    for (int i = 0; i < DISPLAY_SIZE; i++) {
         buffer1[i] = 0xFF;
     }
- /*
-    set_addr_window();
-    sleep(1);
-    CD_COMMAND;
-    wiringPiSPIDataRW(CHANNEL, command16, 2);
-*/
 
-    CD_DATA;
-    for(int i = 0; i < (480 * 320 * 2); i += 2){
-        wiringPiSPIDataRW(CHANNEL, buffer1 + i, 2);
-    }
-    CS_IDLE;
+    fill_display_from_buffer(buffer1);
+
+    CS_ACTIVE;
+
+    unsigned char buffer2[DISPLAY_SIZE] = {0xFF};
+    int color = 0x556aeb;
+    fill_buffer(buffer2, color);
+    /*for (int i = 0; i < DISPLAY_SIZE; i += 2) {
+        buffer2[i] = 0x42;
+        buffer2[i + 1] = 0xdf;
+    }*/
+
+    fill_display_from_buffer(buffer2);
+
+    return EXIT_SUCCESS;
 }
